@@ -1,0 +1,9 @@
+node_modules/
+.npm-cache/
+*.tgz
+dist/
+
+# Local environment and editor noise
+.env
+.DS_Store
+*.log
