@@ -47,7 +47,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
-  await ensureConnected();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("rayenking-discord-mcp server running on stdio");
