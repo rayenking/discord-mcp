@@ -32,70 +32,93 @@ rayenking-discord-mcp
 
 If `DISCORD_TOKEN` is missing, the process exits gracefully with an error explaining that the environment variable is required.
 
-## OpenCode setup
+## Setup
 
-Example MCP command configuration using `bash -c` and an inline token:
+### Linux / macOS
+
+Add to your MCP client config (OpenCode, Claude Desktop, etc.):
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "discord": {
-      "command": "bash",
-      "args": [
-        "-c",
-        "DISCORD_TOKEN='xxx' exec rayenking-discord-mcp"
-      ]
+      "type": "local",
+      "command": ["bash", "-c", "DISCORD_TOKEN='your-bot-token' exec rayenking-discord-mcp"]
     }
   }
 }
 ```
 
-Replace `xxx` with your actual bot token, or inject the token from your own secret management flow.
-
-## Claude Desktop setup
-
-Example `claude_desktop_config.json` entry:
+Or using `npx`:
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "discord": {
-      "command": "bash",
-      "args": [
-        "-c",
-        "DISCORD_TOKEN='xxx' exec rayenking-discord-mcp"
-      ]
+      "type": "local",
+      "command": ["bash", "-c", "DISCORD_TOKEN='your-bot-token' exec npx -y @rayenking/discord-mcp"]
     }
   }
 }
 ```
 
-If you prefer `npx`, this also works:
+### Windows
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "discord": {
-      "command": "bash",
-      "args": [
-        "-c",
-        "DISCORD_TOKEN='xxx' exec npx @rayenking/discord-mcp"
-      ]
+      "type": "local",
+      "command": ["powershell", "-Command", "$env:DISCORD_TOKEN='your-bot-token'; npx.cmd -y @rayenking/discord-mcp"]
     }
   }
 }
 ```
 
-## Generic MCP client guidance
+> **Important:** On Windows, use `npx.cmd` instead of `npx` (PowerShell execution policy may block the `.ps1` wrapper that `npx` resolves to).
+
+#### If the token is still not detected on Windows
+
+Some MCP clients may not propagate environment variables correctly. Set `DISCORD_TOKEN` as a permanent system environment variable:
+
+**Option 1 — PowerShell (current user, persistent):**
+
+```powershell
+[Environment]::SetEnvironmentVariable('DISCORD_TOKEN', 'your-bot-token', 'User')
+```
+
+Then restart your terminal and MCP client. The token will be available to all processes.
+
+**Option 2 — System Settings:**
+
+1. Open **Settings** → **System** → **About** → **Advanced system settings**
+2. Click **Environment Variables**
+3. Under **User variables**, click **New**
+4. Variable name: `DISCORD_TOKEN`
+5. Variable value: your bot token
+6. Click OK, restart your terminal and MCP client
+
+After setting the global env var, simplify your config to:
+
+```json
+{
+  "mcp": {
+    "discord": {
+      "type": "local",
+      "command": ["npx.cmd", "-y", "@rayenking/discord-mcp"]
+    }
+  }
+}
+```
+
+### Generic MCP client
 
 Any MCP client that can launch a stdio server can use this package.
 
-1. Install or invoke the package with `npx @rayenking/discord-mcp`
+1. Invoke with `npx @rayenking/discord-mcp` (or `npx.cmd` on Windows)
 2. Set `DISCORD_TOKEN` in the launched process environment
-3. Start the server over stdio
-4. Let the client discover tools dynamically from the MCP `tools/list` response
-
-If your client supports environment variables directly, prefer that over hardcoding secrets in config files.
+3. Connect over stdio
+4. Tools are discovered dynamically from the MCP `tools/list` response
 
 ## Discord bot setup
 
