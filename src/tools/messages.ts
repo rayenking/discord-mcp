@@ -45,12 +45,28 @@ function buildEmbed(args: Record<string, unknown>): EmbedBuilder {
 const definitions: ToolModule["definitions"] = [
   {
     name: "discord_read_messages",
-    description: "Read the last N messages from a text channel.",
+    description:
+      "Read messages from a text channel. Returns newest-first by default. Use 'before' to page backward (older) or 'after' to page forward (newer) from a message ID.",
     inputSchema: {
       type: "object" as const,
       properties: {
         channel_id: { type: "string", description: "The text channel ID to read from." },
         limit: { type: "number", description: "Number of messages to fetch (1-100, default 20)." },
+        before: {
+          type: "string",
+          description:
+            "Message ID cursor: fetch messages BEFORE this message (older messages). Use for backward pagination.",
+        },
+        after: {
+          type: "string",
+          description:
+            "Message ID cursor: fetch messages AFTER this message (newer messages). Use for forward pagination.",
+        },
+        around: {
+          type: "string",
+          description:
+            "Message ID cursor: fetch messages around this message ID. Returns messages before and after the given ID.",
+        },
       },
       required: ["channel_id"],
     },
@@ -302,7 +318,8 @@ const definitions: ToolModule["definitions"] = [
   },
   {
     name: "discord_search_messages",
-    description: "Search messages in a channel by keyword (scans up to last 100 messages).",
+    description:
+      "Search messages in a channel by keyword. Scans backward through channel history in batches of 100, up to max_messages total (default 100, max 1000). Use 'before' to start scanning from a specific message ID.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -310,7 +327,18 @@ const definitions: ToolModule["definitions"] = [
         keyword: { type: "string", description: "The keyword to search for." },
         limit: {
           type: "number",
-          description: "Max messages to scan (default 100).",
+          description:
+            "Max messages to scan (default 100, max 1000). Kept for backward compatibility; prefer max_messages.",
+        },
+        max_messages: {
+          type: "number",
+          description:
+            "Max messages to scan (default 100, max 1000). Overrides 'limit' if provided.",
+        },
+        before: {
+          type: "string",
+          description:
+            "Message ID cursor: start scanning from messages BEFORE this message. If omitted, starts from the most recent message.",
         },
       },
       required: ["channel_id", "keyword"],
@@ -396,7 +424,15 @@ const handlers: ToolModule["handlers"] = {
     const channelId = args.channel_id as string;
     const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 100);
     const channel = await getTextChannel(channelId);
-    const messages = await channel.messages.fetch({ limit });
+
+    const fetchOptions: { limit: number; before?: string; after?: string; around?: string } = {
+      limit,
+    };
+    if (args.before) fetchOptions.before = args.before as string;
+    if (args.after) fetchOptions.after = args.after as string;
+    if (args.around) fetchOptions.around = args.around as string;
+
+    const messages = await channel.messages.fetch(fetchOptions);
     const serialized = await Promise.all(messages.map((m) => serializeMessage(m)));
     return text(serialized);
   },
@@ -534,12 +570,38 @@ const handlers: ToolModule["handlers"] = {
   async discord_search_messages(args) {
     const channel = await getTextChannel(args.channel_id as string);
     const keyword = (args.keyword as string).toLowerCase();
-    const limit = Math.min(Math.max(Number(args.limit) || 100, 1), 100);
 
-    const messages = await channel.messages.fetch({ limit });
-    const matches = messages.filter((m) => m.content.toLowerCase().includes(keyword));
-    const serialized = await Promise.all(matches.map((m) => serializeMessage(m)));
-    return text(serialized);
+    // max_messages takes priority over limit for the total scan budget
+    const maxMessages = Math.min(
+      Math.max(Number(args.max_messages ?? args.limit ?? 100), 1),
+      1000,
+    );
+    const batchSize = 100;
+    const matches: Awaited<ReturnType<typeof serializeMessage>>[] = [];
+    let scanned = 0;
+    let cursor: string | undefined = args.before as string | undefined;
+
+    while (scanned < maxMessages) {
+      const batch = Math.min(batchSize, maxMessages - scanned);
+      const fetchOpts: { limit: number; before?: string } = { limit: batch };
+      if (cursor) fetchOpts.before = cursor;
+
+      const messages = await channel.messages.fetch(fetchOpts);
+      if (messages.size === 0) break; // no more messages in channel
+
+      for (const m of messages.values()) {
+        if (m.content.toLowerCase().includes(keyword)) {
+          matches.push(await serializeMessage(m));
+        }
+      }
+
+      scanned += messages.size;
+      // Use the oldest message in this batch as the next cursor
+      cursor = messages.last()?.id;
+      if (messages.size < batch) break; // reached end of channel
+    }
+
+    return text(matches);
   },
 
   async discord_forward_message(args) {
